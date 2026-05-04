@@ -402,8 +402,7 @@ function App() {
     // CRITICAL: Fetch real weather and calculate game difficulty using AI consensus
     // Must be called BEFORE starting game - affects car speed and enemy behavior
     if (!clientRef.current || !isWalletConnected) {
-      setStatus({ message: "⚠️ Wallet not connected - using default difficulty", type: "warning" });
-      return;
+      throw new Error("Wallet not connected - GenLayer AI features required");
     }
     
     try {
@@ -451,7 +450,7 @@ function App() {
       });
     } catch (error) {
       console.error("Failed to update difficulty:", error);
-      setStatus({ message: "⚠️ Using default difficulty", type: "warning" });
+      throw new Error("GenLayer AI difficulty calculation failed: " + error.message);
     }
   };
 
@@ -460,8 +459,7 @@ function App() {
     // Game CANNOT spawn enemies without calling this first
     // Pattern is generated based on player skill and current weather
     if (!clientRef.current || !isWalletConnected) {
-      setStatus({ message: "⚠️ Wallet not connected - using default pattern", type: "warning" });
-      return;
+      throw new Error("Wallet not connected - GenLayer AI enemy patterns required");
     }
     
     try {
@@ -494,7 +492,7 @@ function App() {
       setStatus({ message: "✅ Enemy pattern loaded from AI consensus", type: "success" });
     } catch (error) {
       console.error("Failed to generate enemy pattern:", error);
-      setStatus({ message: "⚠️ Using default enemy pattern", type: "warning" });
+      throw new Error("GenLayer AI enemy pattern generation failed: " + error.message);
     }
   };
 
@@ -524,13 +522,16 @@ function App() {
     }
   };
 
-  const submitScoreIntelligent = async (finalScore, moves) => {
+  const submitScoreIntelligent = async (finalScore, moves, sessionIdToUse) => {
     // CRITICAL: Submit score with AI-powered anti-cheat validation
     // Score is ONLY recorded if AI validators agree it's legitimate
     // Uses LLM consensus to analyze gameplay data and detect cheaters
-    if (!clientRef.current || !isWalletConnected) return;
+    if (!clientRef.current || !isWalletConnected) {
+      throw new Error("Wallet not connected - Cannot submit score without GenLayer AI validation");
+    }
     
     const gameTime = Math.floor((Date.now() - gameStartTime) / 1000);
+    const sid = sessionIdToUse || soloId || "solo_" + playerName;
     
     try {
       setStatus({ message: "🤖 AI validating score for cheating...", type: "loading" });
@@ -539,7 +540,7 @@ function App() {
       const tx = await clientRef.current.writeContract({
         address: CONTRACT_ADDRESS,
         functionName: "submit_score_intelligent",
-        args: [sessionId || "solo", playerName, finalScore.toString(), gameTime.toString(), moves],
+        args: [sid, playerName, finalScore.toString(), gameTime.toString(), moves || "left,right,left"],
       });
       await clientRef.current.waitForTransactionReceipt({ hash: tx, status: "FINALIZED" });
       
@@ -549,8 +550,7 @@ function App() {
       return "ACCEPTED";
     } catch (error) {
       console.error("Failed to submit score:", error);
-      setStatus({ message: "❌ Score rejected by AI validation", type: "error" });
-      return "REJECTED";
+      throw new Error("GenLayer AI score validation failed: " + error.message);
     }
   };
 
@@ -657,16 +657,12 @@ function App() {
       }
     } catch (error) {
       console.error("Failed to initialize intelligent game features:", error);
-      setStatus({ message: "⚠️ Using default settings", type: "warning" });
-      
-      // Continue with defaults
-      setScreen("playing");
-      setGameState({
-        score: 0,
-        fuel: 100,
-        speed: 3,
-        isRunning: true
+      setStatus({ 
+        message: "❌ Cannot start game: GenLayer AI features required", 
+        type: "error" 
       });
+      // CRITICAL: Game CANNOT start without intelligent features - they are INTEGRAL
+      return;
     }
   };
 
@@ -726,73 +722,68 @@ function App() {
     
     // CRITICAL: Submit score with AI anti-cheat validation (INTEGRAL GenLayer feature)
     // Score is ONLY recorded if AI validators agree it's legitimate
+    // CRITICAL: Score submission REQUIRES GenLayer AI validation - cannot submit without it
     try {
-      if (isWalletConnected && clientRef.current) {
-        // Use GenLayer intelligent score submission with AI anti-cheat
-        const result = await submitScoreIntelligent(finalScore, gameMoves);
-        console.log("Score submission result:", result);
-        
-        if (result === "ACCEPTED") {
-          // Score verified by AI - fetch updated leaderboard from blockchain
-          console.log("Score accepted by AI, fetching updated leaderboard...");
-          
-          // Fetch updated leaderboard from blockchain
-          if (clientRef.current) {
-            try {
-              if (gameMode === "solo") {
-                const soloResult = await clientRef.current.readContract({
-                  address: CONTRACT_ADDRESS,
-                  functionName: "get_solo_leaderboard",
-                  args: [],
-                });
-                
-                if (soloResult) {
-                  const entries = soloResult.split('\n').filter(Boolean);
-                  const soloData = entries.map((entry, index) => {
-                    const [name, score] = entry.split(':');
-                    return { 
-                      rank: index + 1, 
-                      name: name || 'Anonymous', 
-                      score: parseInt(score) || 0 
-                    };
-                  });
-                  setSoloLeaderboard(soloData);
-                }
-              } else {
-                const multiResult = await clientRef.current.readContract({
-                  address: CONTRACT_ADDRESS,
-                  functionName: "get_leaderboard",
-                  args: [],
-                });
-                
-                if (multiResult) {
-                  const entries = multiResult.split('\n').filter(Boolean);
-                  const multiData = entries.map((entry, index) => {
-                    const [name, score] = entry.split(':');
-                    return { 
-                      rank: index + 1, 
-                      name: name || 'Anonymous', 
-                      score: parseInt(score) || 0 
-                    };
-                  });
-                  setLeaderboard(multiData);
-                }
-              }
-            } catch (error) {
-              console.error("Failed to fetch updated leaderboard:", error);
+      if (!isWalletConnected || !clientRef.current) {
+        throw new Error("Wallet not connected - GenLayer AI validation required for score submission");
+      }
+      
+      // Use GenLayer intelligent score submission with AI anti-cheat (INTEGRAL)
+      const result = await submitScoreIntelligent(finalScore, gameMoves);
+      console.log("Score submission result:", result);
+      
+      // Score verified by AI - fetch updated leaderboard from blockchain
+      console.log("Score accepted by AI, fetching updated leaderboard...");
+      
+      // Fetch updated leaderboard from blockchain
+      if (clientRef.current) {
+        try {
+          if (gameMode === "solo") {
+            const soloResult = await clientRef.current.readContract({
+              address: CONTRACT_ADDRESS,
+              functionName: "get_solo_leaderboard",
+              args: [],
+            });
+            
+            if (soloResult) {
+              const entries = soloResult.split('\n').filter(Boolean);
+              const soloData = entries.map((entry, index) => {
+                const [name, score] = entry.split(':');
+                return { 
+                  rank: index + 1, 
+                  name: name || 'Anonymous', 
+                  score: parseInt(score) || 0 
+                };
+              });
+              setSoloLeaderboard(soloData);
+            }
+          } else {
+            const multiResult = await clientRef.current.readContract({
+              address: CONTRACT_ADDRESS,
+              functionName: "get_leaderboard",
+              args: [],
+            });
+            
+            if (multiResult) {
+              const entries = multiResult.split('\n').filter(Boolean);
+              const multiData = entries.map((entry, index) => {
+                const [name, score] = entry.split(':');
+                return { 
+                  rank: index + 1, 
+                  name: name || 'Anonymous', 
+                  score: parseInt(score) || 0 
+                };
+              });
+              setLeaderboard(multiData);
             }
           }
-        } else {
-          console.warn("Score rejected by AI validation");
-          setStatus({ message: "⚠️ Score flagged by AI - review pending", type: "warning" });
+        } catch (error) {
+          console.error("Failed to fetch updated leaderboard:", error);
         }
-      } else {
-        // Wallet not connected - show warning
-        console.log("Wallet not connected - score not recorded on blockchain");
-        setStatus({ message: "⚠️ Connect wallet to record score", type: "warning" });
       }
     } catch (error) {
       console.error("Error submitting score:", error);
+      setStatus({ message: "❌ Score not recorded: " + error.message, type: "error" });
     } finally {
       setIsSubmitting(false);
     }
