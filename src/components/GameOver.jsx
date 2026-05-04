@@ -120,7 +120,7 @@ const GameOver = ({ gameMode, gameResult, finalScore, isSubmitting, onPlayAgain,
             className="game-button bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 px-6 py-3 text-lg"
           >
             <RotateCcw className="w-5 h-5 inline mr-2" />
-            🔄 Main Lagi
+            🔄 Play Again
           </button>
         </motion.div>
 
