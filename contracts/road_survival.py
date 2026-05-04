@@ -113,7 +113,22 @@ class RoadSurvivalGame(gl.Contract):
     
     @gl.public.view
     def get_stats(self):
-        return "stats"
+        """
+        Get real-time game statistics from blockchain
+        """
+        # Count total games from leaderboard entries
+        total_games = 0
+        if self.leaderboard:
+            total_games += len(self.leaderboard.split('\n'))
+        if self.solo_leaderboard:
+            total_games += len(self.solo_leaderboard.split('\n'))
+        
+        # Count active sessions
+        active_players = 0
+        if self.sessions:
+            active_players = len([s for s in self.sessions.split('\n') if ':playing' in s])
+        
+        return f"{total_games}:{active_players}"
     
     # ==================== GENLayer LLM INTEGRATION ====================
     

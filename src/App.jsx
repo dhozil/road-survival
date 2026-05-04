@@ -98,31 +98,67 @@ function App() {
   const gameCanvasRef = useRef(null);
   const animationRef = useRef(null);
 
-  // Initialize backend connection for leaderboard
+  // Initialize leaderboard from blockchain (REAL-TIME)
   useEffect(() => {
-    const fetchLeaderboards = async () => {
+    const fetchLeaderboardsFromBlockchain = async () => {
+      if (!clientRef.current) return;
+      
       try {
-        // Fetch solo leaderboard from backend
-        const soloResponse = await fetch('http://localhost:3001/api/solo-leaderboard');
-        const soloData = await soloResponse.json();
-        setSoloLeaderboard(soloData);
+        // Fetch solo leaderboard from GenLayer blockchain
+        const soloResult = await clientRef.current.readContract({
+          address: CONTRACT_ADDRESS,
+          functionName: "get_solo_leaderboard",
+          args: [],
+        });
         
-        // Fetch multiplayer leaderboard from backend
-        const multiResponse = await fetch('http://localhost:3001/api/multiplayer-leaderboard');
-        const multiData = await multiResponse.json();
-        setLeaderboard(multiData);
+        // Parse solo leaderboard data
+        if (soloResult) {
+          const entries = soloResult.split('\n').filter(Boolean);
+          const soloData = entries.map((entry, index) => {
+            const [name, score] = entry.split(':');
+            return { 
+              rank: index + 1, 
+              name: name || 'Anonymous', 
+              score: parseInt(score) || 0 
+            };
+          });
+          setSoloLeaderboard(soloData);
+        }
+        
+        // Fetch multiplayer leaderboard from GenLayer blockchain
+        const multiResult = await clientRef.current.readContract({
+          address: CONTRACT_ADDRESS,
+          functionName: "get_leaderboard",
+          args: [],
+        });
+        
+        // Parse multiplayer leaderboard data
+        if (multiResult) {
+          const entries = multiResult.split('\n').filter(Boolean);
+          const multiData = entries.map((entry, index) => {
+            const [name, score] = entry.split(':');
+            return { 
+              rank: index + 1, 
+              name: name || 'Anonymous', 
+              score: parseInt(score) || 0 
+            };
+          });
+          setLeaderboard(multiData);
+        }
+        
+        // Also fetch real-time stats
+        await fetchStats(clientRef.current);
+        
       } catch (error) {
-        console.error("Error fetching leaderboards from backend:", error);
-        // Fallback to localStorage if backend fails
-        const soloLocalData = localStorage.getItem('road_survival_solo_leaderboard');
-        const multiLocalData = localStorage.getItem('road_survival_multi_leaderboard');
-        
-        if (soloLocalData) setSoloLeaderboard(JSON.parse(soloLocalData));
-        if (multiLocalData) setLeaderboard(JSON.parse(multiLocalData));
+        console.error("Error fetching leaderboards from blockchain:", error);
       }
     };
 
-    fetchLeaderboards();
+    // Fetch immediately and set up interval for real-time updates
+    fetchLeaderboardsFromBlockchain();
+    const interval = setInterval(fetchLeaderboardsFromBlockchain, 5000); // Update every 5 seconds
+
+    return () => clearInterval(interval);
 
     // Setup WebSocket connection for real-time updates
     const socket = io('http://localhost:3001');
@@ -209,11 +245,14 @@ function App() {
         args: [],
       });
       
-      // Mock stats for now
-      setStats({ 
-        totalGames: Math.floor(Math.random() * 100), 
-        activePlayers: Math.floor(Math.random() * 50) 
-      });
+      // Parse real stats from contract (format: "totalGames:activePlayers")
+      if (res && res.includes(':')) {
+        const [totalGames, activePlayers] = res.split(':');
+        setStats({ 
+          totalGames: parseInt(totalGames) || 0, 
+          activePlayers: parseInt(activePlayers) || 0 
+        });
+      }
     } catch (error) {
       console.error("Failed to fetch stats:", error);
     }
@@ -690,97 +729,63 @@ function App() {
         console.log("Score submission result:", result);
         
         if (result === "ACCEPTED") {
-          // Also save to localStorage as backup
-          if (gameMode === "solo") {
-            const soloData = localStorage.getItem('road_survival_solo_leaderboard');
-            let soloLeaderboard = soloData ? JSON.parse(soloData) : [];
-            
-            const existingPlayerIndex = soloLeaderboard.findIndex(entry => entry.name === playerName);
-            
-            if (existingPlayerIndex !== -1) {
-              if (finalScore > soloLeaderboard[existingPlayerIndex].score) {
-                soloLeaderboard[existingPlayerIndex].score = finalScore;
+          // Score verified by AI - fetch updated leaderboard from blockchain
+          console.log("Score accepted by AI, fetching updated leaderboard...");
+          
+          // Fetch updated leaderboard from blockchain
+          if (clientRef.current) {
+            try {
+              if (gameMode === "solo") {
+                const soloResult = await clientRef.current.readContract({
+                  address: CONTRACT_ADDRESS,
+                  functionName: "get_solo_leaderboard",
+                  args: [],
+                });
+                
+                if (soloResult) {
+                  const entries = soloResult.split('\n').filter(Boolean);
+                  const soloData = entries.map((entry, index) => {
+                    const [name, score] = entry.split(':');
+                    return { 
+                      rank: index + 1, 
+                      name: name || 'Anonymous', 
+                      score: parseInt(score) || 0 
+                    };
+                  });
+                  setSoloLeaderboard(soloData);
+                }
+              } else {
+                const multiResult = await clientRef.current.readContract({
+                  address: CONTRACT_ADDRESS,
+                  functionName: "get_leaderboard",
+                  args: [],
+                });
+                
+                if (multiResult) {
+                  const entries = multiResult.split('\n').filter(Boolean);
+                  const multiData = entries.map((entry, index) => {
+                    const [name, score] = entry.split(':');
+                    return { 
+                      rank: index + 1, 
+                      name: name || 'Anonymous', 
+                      score: parseInt(score) || 0 
+                    };
+                  });
+                  setLeaderboard(multiData);
+                }
               }
-            } else {
-              soloLeaderboard.push({ name: playerName, score: finalScore, ai_verified: true });
+            } catch (error) {
+              console.error("Failed to fetch updated leaderboard:", error);
             }
-            
-            soloLeaderboard.sort((a, b) => b.score - a.score);
-            soloLeaderboard = soloLeaderboard.slice(0, 10);
-            soloLeaderboard = soloLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
-            
-            localStorage.setItem('road_survival_solo_leaderboard', JSON.stringify(soloLeaderboard));
-            setSoloLeaderboard(soloLeaderboard);
-          } else if (gameMode === "multiplayer") {
-            const multiData = localStorage.getItem('road_survival_multi_leaderboard');
-            let multiLeaderboard = multiData ? JSON.parse(multiData) : [];
-            
-            const existingPlayerIndex = multiLeaderboard.findIndex(entry => entry.name === playerName);
-            
-            if (existingPlayerIndex !== -1) {
-              if (finalScore > multiLeaderboard[existingPlayerIndex].score) {
-                multiLeaderboard[existingPlayerIndex].score = finalScore;
-              }
-            } else {
-              multiLeaderboard.push({ name: playerName, score: finalScore, ai_verified: true });
-            }
-            
-            multiLeaderboard.sort((a, b) => b.score - a.score);
-            multiLeaderboard = multiLeaderboard.slice(0, 10);
-            multiLeaderboard = multiLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
-            
-            localStorage.setItem('road_survival_multi_leaderboard', JSON.stringify(multiLeaderboard));
-            setLeaderboard(multiLeaderboard);
           }
         } else {
           console.warn("Score rejected by AI validation");
           setStatus({ message: "⚠️ Score flagged by AI - review pending", type: "warning" });
         }
       } else {
-        // Fallback if wallet not connected
-        console.log("Wallet not connected - using localStorage fallback");
-        
-        if (gameMode === "solo") {
-          const soloData = localStorage.getItem('road_survival_solo_leaderboard');
-          let soloLeaderboard = soloData ? JSON.parse(soloData) : [];
-          
-          const existingPlayerIndex = soloLeaderboard.findIndex(entry => entry.name === playerName);
-          
-          if (existingPlayerIndex !== -1) {
-            if (finalScore > soloLeaderboard[existingPlayerIndex].score) {
-              soloLeaderboard[existingPlayerIndex].score = finalScore;
-            }
-          } else {
-            soloLeaderboard.push({ name: playerName, score: finalScore });
-          }
-          
-          soloLeaderboard.sort((a, b) => b.score - a.score);
-          soloLeaderboard = soloLeaderboard.slice(0, 10);
-          soloLeaderboard = soloLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
-          
-          localStorage.setItem('road_survival_solo_leaderboard', JSON.stringify(soloLeaderboard));
-          setSoloLeaderboard(soloLeaderboard);
-        } else if (gameMode === "multiplayer") {
-          const multiData = localStorage.getItem('road_survival_multi_leaderboard');
-          let multiLeaderboard = multiData ? JSON.parse(multiData) : [];
-          
-          const existingPlayerIndex = multiLeaderboard.findIndex(entry => entry.name === playerName);
-          
-          if (existingPlayerIndex !== -1) {
-            if (finalScore > multiLeaderboard[existingPlayerIndex].score) {
-              multiLeaderboard[existingPlayerIndex].score = finalScore;
-            }
-          } else {
-            multiLeaderboard.push({ name: playerName, score: finalScore });
-          }
-          
-          multiLeaderboard.sort((a, b) => b.score - a.score);
-          multiLeaderboard = multiLeaderboard.slice(0, 10);
-          multiLeaderboard = multiLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
-          
-          localStorage.setItem('road_survival_multi_leaderboard', JSON.stringify(multiLeaderboard));
-          setLeaderboard(multiLeaderboard);
-        }
+        // Wallet not connected - show warning
+        console.log("Wallet not connected - score not recorded on blockchain");
+        setStatus({ message: "⚠️ Connect wallet to record score", type: "warning" });
       }
     } catch (error) {
       console.error("Error submitting score:", error);
@@ -797,11 +802,7 @@ function App() {
     setRoomInput("");
     setGameMode("multiplayer");
     setScreen("lobby");
-    // Load from localStorage instead of blockchain
-    const soloData = localStorage.getItem('road_survival_solo_leaderboard');
-    const multiData = localStorage.getItem('road_survival_multi_leaderboard');
-    if (soloData) setSoloLeaderboard(JSON.parse(soloData));
-    if (multiData) setLeaderboard(JSON.parse(multiData));
+    // Leaderboard will be fetched from blockchain on next interval
   };
 
   const restartGame = () => {
