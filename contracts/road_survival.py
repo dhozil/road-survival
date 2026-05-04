@@ -11,12 +11,14 @@ class RoadSurvivalGame(gl.Contract):
     weather_data: str
     car_descriptions: str
     ai_commentary: str
+    current_weather: str
     
     def __init__(self):
         self.weather_data = ""
         self.car_descriptions = ""
         self.ai_commentary = ""
         self.solo_leaderboard = ""
+        self.current_weather = "sunny"
     
     @gl.public.write
     def create_session(self, session_id: str, player_name: str):
@@ -92,31 +94,87 @@ class RoadSurvivalGame(gl.Contract):
     
     # ==================== GENLayer LLM INTEGRATION ====================
     
-    @gl.public.write
-    def generate_car_description(self, car_type: str):
-        """
-        LLM Integration: Generate unique car descriptions using GenLayer's LLM
-        This demonstrates GenLayer's ability to integrate AI for dynamic content
-        """
+    def _leader_generate_description(self, car_type: str):
+        """Leader function: Generate car description using LLM"""
         prompt = f"""Generate a brief, exciting description for a {car_type} racing car in a video game.
         Keep it under 50 words. Focus on speed and style.
         Return ONLY the description, no additional text."""
         
-        description = gl.llm(prompt)
-        self.car_descriptions = car_type + ":" + description
+        response = gl.nondet.exec_prompt(prompt)
+        return response.strip()
+    
+    def _validator_description(self, leader_result, car_type: str) -> bool:
+        """Validator function: Validate car description"""
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        
+        description = leader_result.calldata
+        # Validate: must be non-empty string and reasonable length
+        if not isinstance(description, str):
+            return False
+        if len(description.strip()) == 0:
+            return False
+        if len(description) > 200:  # Max 200 chars
+            return False
+        return True
+    
+    @gl.public.write
+    def generate_car_description(self, car_type: str):
+        """
+        LLM Integration: Generate unique car descriptions using GenLayer's LLM
+        Uses leader/validator pattern for consensus on non-deterministic LLM output
+        """
+        description = gl.vm.run_nondet_unsafe(
+            lambda: self._leader_generate_description(car_type),
+            lambda leader: self._validator_description(leader, car_type)
+        )
+        
+        # Store the result
+        if self.car_descriptions:
+            self.car_descriptions = self.car_descriptions + "\n" + car_type + ":" + description
+        else:
+            self.car_descriptions = car_type + ":" + description
+    
+    def _leader_generate_commentary(self, player_name: str, score: str, action: str):
+        """Leader function: Generate AI commentary using LLM"""
+        prompt = f"""Generate a short, exciting racing game commentary (max 30 words) for player {player_name} 
+        who scored {score} points and {action}.
+        Return ONLY the commentary, no additional text."""
+        
+        response = gl.nondet.exec_prompt(prompt)
+        return response.strip()
+    
+    def _validator_commentary(self, leader_result) -> bool:
+        """Validator function: Validate commentary"""
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        
+        commentary = leader_result.calldata
+        # Validate: must be non-empty string and reasonable length
+        if not isinstance(commentary, str):
+            return False
+        if len(commentary.strip()) == 0:
+            return False
+        if len(commentary) > 150:  # Max 150 chars
+            return False
+        return True
     
     @gl.public.write
     def generate_ai_commentary(self, player_name: str, score: str, action: str):
         """
         LLM Integration: Generate AI commentary for game events
-        Uses GenLayer's LLM to create dynamic, engaging game commentary
+        Uses leader/validator pattern for consensus on non-deterministic LLM output
         """
-        prompt = f"""Generate a short, exciting racing game commentary (max 30 words) for player {player_name} 
-        who scored {score} points and {action}.
-        Return ONLY the commentary, no additional text."""
+        commentary = gl.vm.run_nondet_unsafe(
+            lambda: self._leader_generate_commentary(player_name, score, action),
+            self._validator_commentary
+        )
         
-        commentary = gl.llm(prompt)
-        self.ai_commentary = player_name + ":" + score + ":" + commentary
+        # Store the result
+        if self.ai_commentary:
+            self.ai_commentary = self.ai_commentary + "\n" + player_name + ":" + score + ":" + commentary
+        else:
+            self.ai_commentary = player_name + ":" + score + ":" + commentary
     
     @gl.public.view
     def get_car_description(self, car_type: str):
@@ -146,20 +204,53 @@ class RoadSurvivalGame(gl.Contract):
     
     # ==================== GENLayer WEB FETCHING ====================
     
+    def _leader_fetch_weather(self, city: str):
+        """Leader function: Fetch weather data from external API"""
+        weather_url = f"https://wttr.in/{city}?format=%C+%t"
+        weather_data = gl.nondet.web.get(weather_url, mode="text")
+        return weather_data.strip()
+    
+    def _validator_weather(self, leader_result) -> bool:
+        """Validator function: Validate weather data"""
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        
+        weather_data = leader_result.calldata
+        # Validate: must be non-empty string
+        if not isinstance(weather_data, str):
+            return False
+        if len(weather_data.strip()) == 0:
+            return False
+        return True
+    
     @gl.public.write
     def fetch_weather_conditions(self, city: str):
         """
         Web Fetching: Fetch real-time weather data from external API
-        This demonstrates GenLayer's ability to fetch external web data
-        Weather conditions can affect game physics (e.g., rain = slippery roads)
+        Uses leader/validator pattern for consensus on web data
+        Weather conditions affect game physics (rain = slippery roads)
         """
-        try:
-            # Using a free weather API (wttr.in)
-            weather_url = f"https://wttr.in/{city}?format=%C+%t"
-            weather_data = gl.fetch(weather_url)
+        weather_data = gl.vm.run_nondet_unsafe(
+            lambda: self._leader_fetch_weather(city),
+            self._validator_weather
+        )
+        
+        # Parse weather condition for game effects
+        weather_lower = weather_data.lower()
+        if "rain" in weather_lower or "drizzle" in weather_lower:
+            self.current_weather = "rainy"
+        elif "snow" in weather_lower or "ice" in weather_lower:
+            self.current_weather = "snowy"
+        elif "cloud" in weather_lower or "overcast" in weather_lower:
+            self.current_weather = "cloudy"
+        else:
+            self.current_weather = "sunny"
+        
+        # Store the result
+        if self.weather_data:
+            self.weather_data = self.weather_data + "\n" + city + ":" + weather_data
+        else:
             self.weather_data = city + ":" + weather_data
-        except Exception as e:
-            self.weather_data = city + ":sunny+20°C"  # Fallback
     
     @gl.public.view
     def get_weather_conditions(self, city: str):
@@ -173,20 +264,49 @@ class RoadSurvivalGame(gl.Contract):
                     return entry.split(':', 1)[1] if ':' in entry else entry
         return "sunny+20°C"
     
+    @gl.public.view
+    def get_current_weather(self):
+        """
+        Get current weather condition for game difficulty calculation
+        Returns: sunny, rainy, cloudy, or snowy
+        """
+        return self.current_weather
+    
+    def _leader_fetch_car_stats(self, car_model: str):
+        """Leader function: Fetch car statistics from Wikipedia"""
+        stats_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{car_model}"
+        car_data = gl.nondet.web.get(stats_url, mode="text")
+        return str(car_data)[:200]  # Limit length
+    
+    def _validator_car_stats(self, leader_result) -> bool:
+        """Validator function: Validate car stats"""
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        
+        stats = leader_result.calldata
+        if not isinstance(stats, str):
+            return False
+        if len(stats.strip()) == 0:
+            return False
+        return True
+    
     @gl.public.write
     def fetch_car_stats(self, car_model: str):
         """
         Web Fetching: Fetch car statistics from external source
-        This can be used to balance game mechanics based on real car data
+        Uses leader/validator pattern for consensus on web data
+        Real car data affects game balance (speed, handling, etc.)
         """
-        try:
-            # Using a car API or Wikipedia for car stats
-            # For demo, we'll use a structured approach
-            stats_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{car_model}"
-            car_data = gl.fetch(stats_url)
-            self.car_descriptions = car_model + ":stats:" + str(car_data)[:200]  # Limit length
-        except Exception as e:
-            self.car_descriptions = car_model + ":stats:unknown"
+        car_data = gl.vm.run_nondet_unsafe(
+            lambda: self._leader_fetch_car_stats(car_model),
+            self._validator_car_stats
+        )
+        
+        # Store the result
+        if self.car_descriptions:
+            self.car_descriptions = self.car_descriptions + "\n" + car_model + ":stats:" + car_data
+        else:
+            self.car_descriptions = car_model + ":stats:" + car_data
     
     # ==================== EQUIVALENCE PRINCIPLE ====================
     
@@ -267,3 +387,45 @@ class RoadSurvivalGame(gl.Contract):
                 return "Expert player - Challenge top leaderboard"
         except:
             return "Invalid score - Please enter a number"
+    
+    # ==================== GAME LOGIC INTEGRATION ====================
+    
+    @gl.public.view
+    def get_game_speed_multiplier(self):
+        """
+        Get speed multiplier based on current weather
+        Used by game to adjust car speed dynamically
+        Rainy/snowy weather reduces speed for realism
+        """
+        multipliers = {
+            "sunny": 1.0,
+            "cloudy": 0.95,
+            "rainy": 0.85,
+            "snowy": 0.75
+        }
+        return str(multipliers.get(self.current_weather, 1.0))
+    
+    @gl.public.view
+    def get_car_performance(self, car_type: str):
+        """
+        Get car performance stats based on AI-generated description
+        Uses LLM to analyze car type and return performance characteristics
+        """
+        description = self.get_car_description(car_type)
+        if not description:
+            return "unknown:50:50:50"  # type:speed:handling:acceleration
+        
+        # Simple heuristic based on car type
+        performance_map = {
+            "f1": "f1:95:90:98",
+            "racing": "racing:90:85:92",
+            "sports": "sports:85:80:88",
+            "muscle": "muscle:80:65:85",
+            "luxury": "luxury:75:85:70",
+            "sedan": "sedan:65:75:60",
+            "hatchback": "hatchback:60:80:55",
+            "suv": "suv:55:70:50",
+            "truck": "truck:50:55:45"
+        }
+        
+        return performance_map.get(car_type.lower(), "unknown:50:50:50")
