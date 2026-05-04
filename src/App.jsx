@@ -91,6 +91,7 @@ function App() {
   });
   const [gameMoves, setGameMoves] = useState(""); // Track moves for AI anti-cheat
   const [gameStartTime, setGameStartTime] = useState(null);
+  const [gameSessionId, setGameSessionId] = useState(0); // Force GameCanvas remount
 
   // Refs
   const socketRef = useRef(null);
@@ -621,6 +622,9 @@ function App() {
       setGameStartTime(Date.now());
       setGameMoves("");
       
+      // 4. Force GameCanvas remount for fresh game
+      setGameSessionId(Date.now());
+      
       setScreen("playing");
       console.log("Screen set to playing");
       
@@ -809,10 +813,14 @@ function App() {
     // Reset game state
     setGameState({
       score: 0,
+      fuel: 100,
+      speed: 3 * parseFloat(intelligentGameState.weatherMultiplier || "1.0"),
       isRunning: true
     });
     setGameResult(null);
-    setScreen("game");
+    // Force GameCanvas remount
+    setGameSessionId(Date.now());
+    setScreen("playing");
   };
 
   const handleModeSelection = (mode) => {
@@ -1199,6 +1207,7 @@ function App() {
 
                 {gameState.isRunning && (
                   <GameCanvas
+                    key={gameSessionId}
                     ref={gameCanvasRef}
                     gameMode={gameMode}
                     onGameOver={handleGameOver}
@@ -1242,6 +1251,7 @@ function App() {
             <div className="flex-1 flex items-center justify-center p-6">
               <div className="w-full h-full relative">
                 <GameCanvas
+                  key={gameSessionId}
                   ref={gameCanvasRef}
                   gameMode={gameMode}
                   onGameOver={handleGameOver}
