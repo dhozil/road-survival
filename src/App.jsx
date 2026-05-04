@@ -29,7 +29,7 @@ import GenLayerFeatures from './components/GenLayerFeatures';
 import ModeSelection from './components/ModeSelection';
 
 // Configuration
-const CONTRACT_ADDRESS = "0xfE6813422db5Bc60f4fdbb0dabde51C8af7Cb88B";
+const CONTRACT_ADDRESS = "0x3c4d0D3d7f925Ec451bd720c44F8679cE0efAb7F";
 const WS_URL = "http://localhost:3001";
 
 // Helper function to shade colors
