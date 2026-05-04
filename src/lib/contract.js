@@ -1,6 +1,6 @@
 import { client } from "./genlayer";
 
-const CONTRACT_ADDRESS = "0x3c4d0D3d7f925Ec451bd720c44F8679cE0efAb7F";
+const CONTRACT_ADDRESS = "0xe57698b060FDB0B69554a3864558D11a4c03F071";
 
 // ==================== BASIC GAME FUNCTIONS ====================
 

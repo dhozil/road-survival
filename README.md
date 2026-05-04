@@ -62,9 +62,11 @@ Open http://localhost:5173
 
 3. **Deploy Contract**
 ```bash
-# Deploy road_fighter_working_final.py to GenLayer
-# Update CONTRACT_ADDRESS in src/App.jsx
+# Deploy contracts/road_survival.py to GenLayer Studio
+# Get contract address and update in src/App.jsx
 ```
+
+**Current Contract Address:** `0xe57698b060FDB0B69554a3864558D11a4c03F071`
 
 ## 📁 Project Structure
 
@@ -115,6 +117,8 @@ RoadSurvivalGame/
 - **Storage**: String-based key-value pairs
 
 ### Key Functions
+
+#### Basic Game Functions
 ```python
 # Solo Mode
 @gl.public.write
@@ -132,6 +136,39 @@ def join_session(self, session_id: str, player_name: str)
 
 @gl.public.write
 def submit_score(self, session_id: str, player_name: str, score: str)
+
+# Real-time Stats
+@gl.public.view
+def get_stats(self)  # Returns "totalGames:activePlayers"
+
+@gl.public.view
+def get_leaderboard(self)
+
+@gl.public.view
+def get_solo_leaderboard(self)
+```
+
+#### INTEGRAL GenLayer Functions (Required for Gameplay)
+```python
+# AI Anti-Cheat Score Submission (CRITICAL)
+@gl.public.write
+def submit_score_intelligent(self, session_id, player_name, score, game_time, moves)
+# Uses LLM consensus to validate score legitimacy - detects cheaters
+
+# Dynamic Difficulty from Real Weather (CRITICAL)  
+@gl.public.write
+def update_game_difficulty(self, city: str)
+# Fetches real weather + AI calculates difficulty - affects car speed
+
+# AI-Generated Enemy Patterns (CRITICAL)
+@gl.public.write
+def generate_enemy_pattern_for_session(self, session_id: str, player_skill: str)
+# LLM generates enemy spawn intervals based on skill + weather
+
+# Get Complete Game State
+@gl.public.view
+def get_intelligent_game_state(self)
+# Returns: weather, difficulty, speed multiplier, enemy pattern availability
 ```
 
 ### Data Format
@@ -149,18 +186,36 @@ This project demonstrates full integration with GenLayer's unique capabilities:
 - **Dynamic Content**: All descriptions and commentary are generated in real-time by the LLM
 
 ```python
-# Generate car description
+# Generate car description using LLM with leader/validator pattern
 @gl.public.write
 def generate_car_description(self, car_type: str):
-    prompt = f"Generate a brief description for a {car_type} racing car..."
-    description = gl.llm(prompt)
+    def leader_fn():
+        prompt = f"Generate a brief description for a {car_type} racing car..."
+        return gl.nondet.exec_prompt(prompt)
+    
+    def validator_fn(leader_result):
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        desc = leader_result.calldata
+        return isinstance(desc, str) and 0 < len(desc) <= 200
+    
+    description = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
     self.car_descriptions = car_type + ":" + description
 
-# Generate AI commentary
-@gl.public.write
+# Generate AI commentary using LLM consensus
+@gl.public.write  
 def generate_ai_commentary(self, player_name: str, score: str, action: str):
-    prompt = f"Generate commentary for player {player_name} who scored {score}..."
-    commentary = gl.llm(prompt)
+    def leader_fn():
+        prompt = f"Generate commentary for player {player_name} who scored {score}..."
+        return gl.nondet.exec_prompt(prompt)
+    
+    def validator_fn(leader_result):
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        commentary = leader_result.calldata
+        return isinstance(commentary, str) and 0 < len(commentary) <= 150
+    
+    commentary = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
     self.ai_commentary = player_name + ":" + score + ":" + commentary
 ```
 
@@ -170,18 +225,46 @@ def generate_ai_commentary(self, player_name: str, score: str, action: str):
 - **Dynamic Game Mechanics**: Weather affects game difficulty (rain = slippery roads, etc.)
 
 ```python
-# Fetch weather data
+# Fetch weather data using web.get with leader/validator pattern
 @gl.public.write
 def fetch_weather_conditions(self, city: str):
-    weather_url = f"https://wttr.in/{city}?format=%C+%t"
-    weather_data = gl.fetch(weather_url)
-    self.weather_data = city + ":" + weather_data
+    def leader_fn():
+        weather_url = f"https://wttr.in/{city}?format=%C+%t"
+        return gl.nondet.web.get(weather_url, mode="text")
+    
+    def validator_fn(leader_result):
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        weather = leader_result.calldata
+        return isinstance(weather, str) and len(weather.strip()) > 0
+    
+    weather_data = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+    
+    # Parse weather for game effects
+    weather_lower = weather_data.lower()
+    if "rain" in weather_lower:
+        self.current_weather = "rainy"
+    elif "snow" in weather_lower:
+        self.current_weather = "snowy"
+    elif "cloud" in weather_lower:
+        self.current_weather = "cloudy"
+    else:
+        self.current_weather = "sunny"
 
-# Fetch car statistics
+# Fetch car statistics from Wikipedia
 @gl.public.write
 def fetch_car_stats(self, car_model: str):
-    stats_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{car_model}"
-    car_data = gl.fetch(stats_url)
+    def leader_fn():
+        stats_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{car_model}"
+        return gl.nondet.web.get(stats_url, mode="text")
+    
+    def validator_fn(leader_result):
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        stats = leader_result.calldata
+        return isinstance(stats, str) and len(stats.strip()) > 0
+    
+    car_data = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
     self.car_descriptions = car_model + ":stats:" + str(car_data)[:200]
 ```
 
@@ -267,7 +350,7 @@ serve -s dist -l 3000
 ### Environment Variables
 ```javascript
 // src/App.jsx
-const CONTRACT_ADDRESS = "0xYOUR_CONTRACT_ADDRESS_HERE"; // ← UPDATE INI
+const CONTRACT_ADDRESS = "0xe57698b060FDB0B69554a3864558D11a4c03F071";
 const WS_URL = "http://localhost:3001";
 ```
 
