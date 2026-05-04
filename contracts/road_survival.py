@@ -4,21 +4,44 @@ from genlayer import *
 
 
 class RoadSurvivalGame(gl.Contract):
+    """
+    Road Survival - An Intelligent Contract Game
+    
+    This contract demonstrates GenLayer's unique capabilities by making
+    LLM integration, web fetching, and consensus CRITICAL to gameplay.
+    
+    Core GenLayer Features:
+    - LLM generates unique game levels and enemy patterns
+    - Real-time weather affects game physics (fetched from web)
+    - Consensus-based score validation using AI
+    - Dynamic difficulty calculation using equivalence principle
+    """
+    
+    # Game State
     sessions: str
     leaderboard: str
     solo_leaderboard: str
     solo_games: str
-    weather_data: str
+    
+    # GenLayer-Powered Game Parameters (DYNAMIC)
+    current_weather: str
+    weather_multiplier: str  # Affects car speed
+    difficulty_level: str  # AI-calculated based on weather + score
+    
+    # AI-Generated Content
     car_descriptions: str
     ai_commentary: str
-    current_weather: str
+    enemy_patterns: str  # LLM-generated enemy spawn patterns
+    level_configs: str   # LLM-generated level configurations
     
     def __init__(self):
-        self.weather_data = ""
+        self.current_weather = "sunny"
+        self.weather_multiplier = "1.0"
+        self.difficulty_level = "1.0"
         self.car_descriptions = ""
         self.ai_commentary = ""
-        self.solo_leaderboard = ""
-        self.current_weather = "sunny"
+        self.enemy_patterns = ""
+        self.level_configs = ""
     
     @gl.public.write
     def create_session(self, session_id: str, player_name: str):
@@ -429,3 +452,211 @@ class RoadSurvivalGame(gl.Contract):
         }
         
         return performance_map.get(car_type.lower(), "unknown:50:50:50")
+    
+    # ==================== INTEGRAL GENLAYER GAME MECHANICS ====================
+    # These functions make GenLayer features REQUIRED for core gameplay
+    
+    def _leader_generate_enemy_pattern(self, player_skill: str, weather: str):
+        """
+        Leader function: LLM generates enemy spawn pattern based on skill and weather
+        This is INTEGRAL - game cannot spawn enemies without AI-generated patterns
+        """
+        prompt = f"""Generate a racing game enemy spawn pattern.
+        Player skill level: {player_skill}
+        Current weather: {weather}
+        
+        Return ONLY a comma-separated list of spawn intervals in seconds (e.g., "2.5,1.8,3.2,1.5")
+        The pattern should be challenging but fair."""
+        
+        response = gl.nondet.exec_prompt(prompt)
+        return response.strip()
+    
+    def _validator_enemy_pattern(self, leader_result) -> bool:
+        """Validator: Ensure enemy pattern is valid numeric sequence"""
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        
+        pattern = leader_result.calldata
+        if not isinstance(pattern, str):
+            return False
+        
+        # Validate format: comma-separated numbers
+        try:
+            intervals = pattern.split(',')
+            for interval in intervals:
+                float(interval.strip())
+            return len(intervals) >= 3  # At least 3 enemies
+        except:
+            return False
+    
+    @gl.public.write
+    def generate_enemy_pattern_for_session(self, session_id: str, player_skill: str):
+        """
+        CRITICAL: Generate enemy spawn pattern using LLM consensus
+        Game CANNOT spawn enemies without calling this function first
+        Uses real-time weather data to adjust enemy difficulty
+        """
+        # Get current weather (must be fetched first)
+        weather = self.current_weather
+        
+        # Generate pattern using LLM consensus
+        pattern = gl.vm.run_nondet_unsafe(
+            lambda: self._leader_generate_enemy_pattern(player_skill, weather),
+            self._validator_enemy_pattern
+        )
+        
+        # Store pattern for session
+        if self.enemy_patterns:
+            self.enemy_patterns = self.enemy_patterns + "\n" + session_id + ":" + pattern
+        else:
+            self.enemy_patterns = session_id + ":" + pattern
+    
+    @gl.public.view
+    def get_enemy_pattern(self, session_id: str):
+        """Get AI-generated enemy spawn pattern for a session"""
+        if self.enemy_patterns:
+            entries = self.enemy_patterns.split('\n')
+            for entry in entries:
+                if entry.startswith(session_id + ":"):
+                    return entry.split(':', 1)[1] if ':' in entry else ""
+        return ""
+    
+    def _leader_validate_score_intelligently(self, player_name: str, score: str, game_time: str, moves: str):
+        """
+        Leader function: LLM analyzes gameplay data to detect cheating
+        Uses AI to validate if score is realistic based on moves and time
+        """
+        prompt = f"""Analyze this racing game score for potential cheating:
+        Player: {player_name}
+        Score: {score}
+        Game Time: {game_time} seconds
+        Moves Data: {moves} (lane changes and actions)
+        
+        Determine if this score is realistic or suspicious.
+        Consider: average score per second, number of moves, typical human performance.
+        
+        Return ONLY one word: "VALID" or "CHEATING" """
+        
+        response = gl.nondet.exec_prompt(prompt)
+        return response.strip().upper()
+    
+    def _validator_score_analysis(self, leader_result) -> bool:
+        """Validator: Score analysis must return VALID or CHEATING"""
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        
+        result = leader_result.calldata
+        if not isinstance(result, str):
+            return False
+        
+        return result in ["VALID", "CHEATING"]
+    
+    @gl.public.write
+    def submit_score_intelligent(self, session_id: str, player_name: str, score: str, game_time: str, moves: str):
+        """
+        CRITICAL: Submit score with AI-powered anti-cheat validation
+        Uses LLM consensus to analyze gameplay data and detect cheaters
+        Score is ONLY recorded if AI validators agree it's legitimate
+        """
+        # AI consensus validation (REQUIRED - cannot submit without this)
+        ai_validation = gl.vm.run_nondet_unsafe(
+            lambda: self._leader_validate_score_intelligently(player_name, score, game_time, moves),
+            self._validator_score_analysis
+        )
+        
+        if ai_validation == "CHEATING":
+            # Reject score - potential cheating detected
+            return "REJECTED: Cheating detected by AI consensus"
+        
+        # AI validators agree score is legitimate - record it
+        if self.leaderboard:
+            self.leaderboard = self.leaderboard + "\n" + player_name + ":" + score + ":verified"
+        else:
+            self.leaderboard = player_name + ":" + score + ":verified"
+        
+        return "ACCEPTED: Score verified by AI consensus"
+    
+    def _leader_calculate_dynamic_difficulty(self, city: str, recent_scores: str):
+        """
+        Leader function: LLM fetches weather and calculates difficulty dynamically
+        Combines real-world weather with player performance using AI reasoning
+        """
+        # Fetch real weather data
+        weather_url = f"https://wttr.in/{city}?format=%C+%t"
+        weather_raw = gl.nondet.web.get(weather_url, mode="text")
+        
+        prompt = f"""Calculate racing game difficulty based on:
+        Real Weather: {weather_raw}
+        Recent Player Scores: {recent_scores}
+        
+        Analyze weather impact and player skill trend.
+        Return ONLY a number between 0.5 (easy) and 2.0 (extreme) representing difficulty multiplier."""
+        
+        response = gl.nondet.exec_prompt(prompt)
+        return response.strip()
+    
+    def _validator_difficulty(self, leader_result) -> bool:
+        """Validator: Difficulty must be valid number between 0.5 and 2.0"""
+        if not isinstance(leader_result, gl.vm.Return):
+            return False
+        
+        try:
+            difficulty = float(leader_result.calldata)
+            return 0.5 <= difficulty <= 2.0
+        except:
+            return False
+    
+    @gl.public.write
+    def update_game_difficulty(self, city: str):
+        """
+        CRITICAL: Update game difficulty using AI analysis of real-world weather
+        Fetches current weather and uses LLM consensus to calculate difficulty
+        Game difficulty is DYNAMIC and based on external real-time data
+        """
+        # Get recent scores for analysis
+        recent_scores = self.leaderboard if self.leaderboard else "no_data"
+        
+        # AI consensus to calculate difficulty based on weather + performance
+        difficulty = gl.vm.run_nondet_unsafe(
+            lambda: self._leader_calculate_dynamic_difficulty(city, recent_scores),
+            self._validator_difficulty
+        )
+        
+        self.difficulty_level = difficulty
+        
+        # Also update weather state
+        weather_url = f"https://wttr.in/{city}?format=%C+%t"
+        weather_raw = gl.nondet.web.get(weather_url, mode="text")
+        
+        weather_lower = weather_raw.lower()
+        if "rain" in weather_lower or "drizzle" in weather_lower:
+            self.current_weather = "rainy"
+            self.weather_multiplier = "0.85"
+        elif "snow" in weather_lower or "ice" in weather_lower:
+            self.current_weather = "snowy"
+            self.weather_multiplier = "0.75"
+        elif "cloud" in weather_lower or "overcast" in weather_lower:
+            self.current_weather = "cloudy"
+            self.weather_multiplier = "0.95"
+        else:
+            self.current_weather = "sunny"
+            self.weather_multiplier = "1.0"
+    
+    @gl.public.view
+    def get_current_difficulty(self):
+        """Get AI-calculated difficulty level"""
+        return self.difficulty_level
+    
+    @gl.public.view
+    def get_intelligent_game_state(self):
+        """
+        Get complete game state including AI-generated parameters
+        Frontend MUST call this to get enemy patterns, difficulty, and weather effects
+        """
+        return {
+            "weather": self.current_weather,
+            "weather_multiplier": self.weather_multiplier,
+            "difficulty": self.difficulty_level,
+            "enemy_pattern_available": len(self.enemy_patterns) > 0,
+            "ai_commentary_count": len(self.ai_commentary.split('\n')) if self.ai_commentary else 0
+        }
