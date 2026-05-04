@@ -530,7 +530,7 @@ function App() {
     socket.on("room_update", ({ players, ready }) => {
       const names = players.map(p => p.name).join(" vs ");
       setStatus({ 
-        message: ready ? `✅ ${names} — Memulai game...` : `⏳ Menunggu pemain lain... ID: ${sid}`, 
+        message: ready ? `✅ ${names} — Starting game...` : `⏳ Waiting for other players... ID: ${sid}`, 
         type: "success" 
       });
     });
@@ -540,7 +540,7 @@ function App() {
     });
 
     socket.on("player_disconnected", ({ playerName: left }) => {
-      setStatus({ message: `❌ ${left} meninggalkan game`, type: "error" });
+      setStatus({ message: `❌ ${left} left the game`, type: "error" });
     });
 
     socket.on("leaderboard_update", (updatedLeaderboard) => {

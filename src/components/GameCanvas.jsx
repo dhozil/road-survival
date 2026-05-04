@@ -279,19 +279,19 @@ const GameCanvas = React.forwardRef(({ gameState, setGameState, onGameOver, game
       carGradient.addColorStop(0.5, shadeColor(color, 20));
       carGradient.addColorStop(1, shadeColor(color, -20));
 
-      // Body utama dengan rounded corners
+      // Main body with rounded corners
       ctx.fillStyle = carGradient;
       ctx.beginPath();
       ctx.roundRect(x - 18, y - 28, 36, 56, 8);
       ctx.fill();
 
-      // Hood (kap mesin)
+      // Hood (engine cover)
       ctx.fillStyle = shadeColor(color, 10);
       ctx.beginPath();
       ctx.roundRect(x - 16, y - 26, 32, 15, 4);
       ctx.fill();
 
-      // Atap mobil (kurva aerodinamis)
+      // Car roof (aerodynamic curve)
       ctx.fillStyle = shadeColor(color, 30);
       ctx.beginPath();
       ctx.moveTo(x - 12, y - 12);
@@ -302,7 +302,7 @@ const GameCanvas = React.forwardRef(({ gameState, setGameState, onGameOver, game
       ctx.closePath();
       ctx.fill();
 
-      // Windshield (kaca depan)
+      // Windshield (front glass)
       ctx.fillStyle = 'rgba(135, 206, 235, 0.7)';
       ctx.beginPath();
       ctx.moveTo(x - 10, y - 10);

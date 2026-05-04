@@ -47,7 +47,7 @@ const GameOver = ({ gameMode, gameResult, finalScore, isSubmitting, onPlayAgain,
           >
             <div className="text-yellow-400 text-2xl font-bold mb-4 flex items-center justify-center gap-2">
               <Trophy className="w-8 h-8" />
-              Pemenang: {gameResult.winner}
+              Winner: {gameResult.winner}
             </div>
             
             <div className="space-y-2">
