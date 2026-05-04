@@ -563,36 +563,66 @@ function App() {
       return;
     }
 
-    setStatus({ message: "Starting solo game...", type: "waiting" });
-    console.log("About to set screen to playing");
+    setPlayerName(pname);
+    setGameMode("solo");
+    setSoloId("solo_" + pname);
     
-    // Switch to playing screen first
-    setScreen("playing");
-    console.log("Screen set to playing");
+    // CRITICAL: Initialize GenLayer intelligent game features BEFORE starting
+    setStatus({ message: "🤖 Initializing AI game features...", type: "loading" });
     
-    // Set game state to running
-    setGameState({
-      score: 0,
-      fuel: 100,
-      speed: 3,
-      isRunning: true
-    });
-    console.log("Game state set to running");
-    
-    setStatus({ message: "🎮 Solo Game - Good luck!", type: "success" });
-    
-    // Real GenLayer transaction (non-blocking)
-    if (clientRef.current) {
-      clientRef.current.writeContract({
-        address: CONTRACT_ADDRESS,
-        functionName: "start_solo",
-        args: [pname],
-      }).then(async (tx) => {
-        await clientRef.current.waitForTransactionReceipt({ hash: tx, status: "FINALIZED" });
-        console.log("Solo game started on GenLayer:", tx);
-      }).catch(error => {
-        console.error("Failed to start solo game:", error);
-        // Don't fail game if transaction fails
+    try {
+      // 1. Update game difficulty using AI + real weather (INTEGRAL - affects car speed)
+      await updateGameDifficultyIntelligent();
+      
+      // 2. Generate enemy pattern using LLM consensus (INTEGRAL - required for enemies)
+      const sessionId = "solo_" + pname;
+      await generateEnemyPatternForGame(sessionId);
+      
+      // 3. Reset game tracking for AI anti-cheat
+      setGameStartTime(Date.now());
+      setGameMoves("");
+      
+      setScreen("playing");
+      console.log("Screen set to playing");
+      
+      // Set game state to running with intelligent parameters
+      setGameState({
+        score: 0,
+        fuel: 100,
+        speed: 3 * parseFloat(intelligentGameState.weatherMultiplier || "1.0"),
+        isRunning: true
+      });
+      console.log("Game state set to running with AI parameters");
+      
+      setStatus({ 
+        message: `🎮 Game Started! AI Difficulty: ${intelligentGameState.difficulty} | Weather: ${intelligentGameState.currentWeather}`, 
+        type: "success" 
+      });
+      
+      // Start solo game on blockchain (non-blocking)
+      if (clientRef.current) {
+        clientRef.current.writeContract({
+          address: CONTRACT_ADDRESS,
+          functionName: "start_solo",
+          args: [pname],
+        }).then(async (tx) => {
+          await clientRef.current.waitForTransactionReceipt({ hash: tx, status: "FINALIZED" });
+          console.log("Solo game started on GenLayer:", tx);
+        }).catch(error => {
+          console.error("Failed to start solo game:", error);
+        });
+      }
+    } catch (error) {
+      console.error("Failed to initialize intelligent game features:", error);
+      setStatus({ message: "⚠️ Using default settings", type: "warning" });
+      
+      // Continue with defaults
+      setScreen("playing");
+      setGameState({
+        score: 0,
+        fuel: 100,
+        speed: 3,
+        isRunning: true
       });
     }
   };
@@ -651,77 +681,113 @@ function App() {
     setScreen("gameover");
     setIsSubmitting(true);
     
-    // Submit score to backend API
+    // CRITICAL: Submit score with AI anti-cheat validation (INTEGRAL GenLayer feature)
+    // Score is ONLY recorded if AI validators agree it's legitimate
     try {
-      if (gameMode === "solo") {
-        const response = await fetch('http://localhost:3001/api/solo-score', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ name: playerName, score: finalScore }),
-        });
-        const data = await response.json();
-        console.log("Solo score saved to backend:", data);
-      } else if (gameMode === "multiplayer") {
-        const response = await fetch('http://localhost:3001/api/multiplayer-score', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ name: playerName, score: finalScore }),
-        });
-        const data = await response.json();
-        console.log("Multiplayer score saved to backend:", data);
+      if (isWalletConnected && clientRef.current) {
+        // Use GenLayer intelligent score submission with AI anti-cheat
+        const result = await submitScoreIntelligent(finalScore, gameMoves);
+        console.log("Score submission result:", result);
+        
+        if (result === "ACCEPTED") {
+          // Also save to localStorage as backup
+          if (gameMode === "solo") {
+            const soloData = localStorage.getItem('road_survival_solo_leaderboard');
+            let soloLeaderboard = soloData ? JSON.parse(soloData) : [];
+            
+            const existingPlayerIndex = soloLeaderboard.findIndex(entry => entry.name === playerName);
+            
+            if (existingPlayerIndex !== -1) {
+              if (finalScore > soloLeaderboard[existingPlayerIndex].score) {
+                soloLeaderboard[existingPlayerIndex].score = finalScore;
+              }
+            } else {
+              soloLeaderboard.push({ name: playerName, score: finalScore, ai_verified: true });
+            }
+            
+            soloLeaderboard.sort((a, b) => b.score - a.score);
+            soloLeaderboard = soloLeaderboard.slice(0, 10);
+            soloLeaderboard = soloLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+            
+            localStorage.setItem('road_survival_solo_leaderboard', JSON.stringify(soloLeaderboard));
+            setSoloLeaderboard(soloLeaderboard);
+          } else if (gameMode === "multiplayer") {
+            const multiData = localStorage.getItem('road_survival_multi_leaderboard');
+            let multiLeaderboard = multiData ? JSON.parse(multiData) : [];
+            
+            const existingPlayerIndex = multiLeaderboard.findIndex(entry => entry.name === playerName);
+            
+            if (existingPlayerIndex !== -1) {
+              if (finalScore > multiLeaderboard[existingPlayerIndex].score) {
+                multiLeaderboard[existingPlayerIndex].score = finalScore;
+              }
+            } else {
+              multiLeaderboard.push({ name: playerName, score: finalScore, ai_verified: true });
+            }
+            
+            multiLeaderboard.sort((a, b) => b.score - a.score);
+            multiLeaderboard = multiLeaderboard.slice(0, 10);
+            multiLeaderboard = multiLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+            
+            localStorage.setItem('road_survival_multi_leaderboard', JSON.stringify(multiLeaderboard));
+            setLeaderboard(multiLeaderboard);
+          }
+        } else {
+          console.warn("Score rejected by AI validation");
+          setStatus({ message: "⚠️ Score flagged by AI - review pending", type: "warning" });
+        }
+      } else {
+        // Fallback if wallet not connected
+        console.log("Wallet not connected - using localStorage fallback");
+        
+        if (gameMode === "solo") {
+          const soloData = localStorage.getItem('road_survival_solo_leaderboard');
+          let soloLeaderboard = soloData ? JSON.parse(soloData) : [];
+          
+          const existingPlayerIndex = soloLeaderboard.findIndex(entry => entry.name === playerName);
+          
+          if (existingPlayerIndex !== -1) {
+            if (finalScore > soloLeaderboard[existingPlayerIndex].score) {
+              soloLeaderboard[existingPlayerIndex].score = finalScore;
+            }
+          } else {
+            soloLeaderboard.push({ name: playerName, score: finalScore });
+          }
+          
+          soloLeaderboard.sort((a, b) => b.score - a.score);
+          soloLeaderboard = soloLeaderboard.slice(0, 10);
+          soloLeaderboard = soloLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+          
+          localStorage.setItem('road_survival_solo_leaderboard', JSON.stringify(soloLeaderboard));
+          setSoloLeaderboard(soloLeaderboard);
+        } else if (gameMode === "multiplayer") {
+          const multiData = localStorage.getItem('road_survival_multi_leaderboard');
+          let multiLeaderboard = multiData ? JSON.parse(multiData) : [];
+          
+          const existingPlayerIndex = multiLeaderboard.findIndex(entry => entry.name === playerName);
+          
+          if (existingPlayerIndex !== -1) {
+            if (finalScore > multiLeaderboard[existingPlayerIndex].score) {
+              multiLeaderboard[existingPlayerIndex].score = finalScore;
+            }
+          } else {
+            multiLeaderboard.push({ name: playerName, score: finalScore });
+          }
+          
+          multiLeaderboard.sort((a, b) => b.score - a.score);
+          multiLeaderboard = multiLeaderboard.slice(0, 10);
+          multiLeaderboard = multiLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+          
+          localStorage.setItem('road_survival_multi_leaderboard', JSON.stringify(multiLeaderboard));
+          setLeaderboard(multiLeaderboard);
+        }
       }
     } catch (error) {
-      console.error("Error saving score to backend:", error);
-      // Fallback to localStorage on error
-      if (gameMode === "solo") {
-        const soloData = localStorage.getItem('road_survival_solo_leaderboard');
-        let soloLeaderboard = soloData ? JSON.parse(soloData) : [];
-        
-        const existingPlayerIndex = soloLeaderboard.findIndex(entry => entry.name === playerName);
-        
-        if (existingPlayerIndex !== -1) {
-          if (finalScore > soloLeaderboard[existingPlayerIndex].score) {
-            soloLeaderboard[existingPlayerIndex].score = finalScore;
-          }
-        } else {
-          soloLeaderboard.push({ name: playerName, score: finalScore });
-        }
-        
-        soloLeaderboard.sort((a, b) => b.score - a.score);
-        soloLeaderboard = soloLeaderboard.slice(0, 10);
-        soloLeaderboard = soloLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
-        
-        localStorage.setItem('road_survival_solo_leaderboard', JSON.stringify(soloLeaderboard));
-        setSoloLeaderboard(soloLeaderboard);
-      } else if (gameMode === "multiplayer") {
-        const multiData = localStorage.getItem('road_survival_multi_leaderboard');
-        let multiLeaderboard = multiData ? JSON.parse(multiData) : [];
-        
-        const existingPlayerIndex = multiLeaderboard.findIndex(entry => entry.name === playerName);
-        
-        if (existingPlayerIndex !== -1) {
-          if (finalScore > multiLeaderboard[existingPlayerIndex].score) {
-            multiLeaderboard[existingPlayerIndex].score = finalScore;
-          }
-        } else {
-          multiLeaderboard.push({ name: playerName, score: finalScore });
-        }
-        
-        multiLeaderboard.sort((a, b) => b.score - a.score);
-        multiLeaderboard = multiLeaderboard.slice(0, 10);
-        multiLeaderboard = multiLeaderboard.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
-        
-        localStorage.setItem('road_survival_multi_leaderboard', JSON.stringify(multiLeaderboard));
-        setLeaderboard(multiLeaderboard);
-      }
+      console.error("Error submitting score:", error);
     } finally {
       setIsSubmitting(false);
     }
-  }, [gameMode, playerName]);
+  }, [gameMode, playerName, gameMoves, isWalletConnected, submitScoreIntelligent]);
 
   const resetToLobby = () => {
     socketRef.current?.disconnect();
