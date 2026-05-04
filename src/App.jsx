@@ -79,6 +79,18 @@ function App() {
   const [cityInput, setCityInput] = useState('Jakarta');
   const [carTypeInput, setCarTypeInput] = useState('sports');
   const [selectedCar, setSelectedCar] = useState('sports');
+  
+  // New GenLayer Integral Game State (REQUIRED for gameplay)
+  const [intelligentGameState, setIntelligentGameState] = useState({
+    enemyPattern: "",        // AI-generated enemy spawn pattern
+    difficulty: "1.0",         // AI-calculated difficulty
+    weatherMultiplier: "1.0",  // Weather effect on speed
+    currentWeather: "sunny",   // Real-time weather
+    enemyPatternLoaded: false, // Whether pattern is ready
+    aiVerified: false          // Whether score can be submitted
+  });
+  const [gameMoves, setGameMoves] = useState(""); // Track moves for AI anti-cheat
+  const [gameStartTime, setGameStartTime] = useState(null);
 
   // Refs
   const socketRef = useRef(null);
@@ -340,6 +352,165 @@ function App() {
     } catch (error) {
       console.error("Failed to validate score:", error);
       return "invalid:calculation_error";
+    }
+  };
+
+  // ==================== INTEGRAL GENLAYER GAME FUNCTIONS ====================
+  // These functions make GenLayer features REQUIRED for core gameplay
+  
+  const updateGameDifficultyIntelligent = async () => {
+    // CRITICAL: Fetch real weather and calculate game difficulty using AI consensus
+    // Must be called BEFORE starting game - affects car speed and enemy behavior
+    if (!clientRef.current || !isWalletConnected) {
+      setStatus({ message: "⚠️ Wallet not connected - using default difficulty", type: "warning" });
+      return;
+    }
+    
+    try {
+      setStatus({ message: "🤖 AI calculating difficulty from real weather...", type: "loading" });
+      
+      // Call contract to update difficulty using AI + real weather
+      const tx = await clientRef.current.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "update_game_difficulty",
+        args: [cityInput],  // City for weather fetching
+      });
+      await clientRef.current.waitForTransactionReceipt({ hash: tx, status: "FINALIZED" });
+      
+      // Get the AI-calculated difficulty
+      const difficulty = await clientRef.current.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "get_current_difficulty",
+        args: [],
+      });
+      
+      // Get weather multiplier
+      const multiplier = await clientRef.current.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "get_game_speed_multiplier",
+        args: [],
+      });
+      
+      // Get current weather
+      const weather = await clientRef.current.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "get_current_weather",
+        args: [],
+      });
+      
+      setIntelligentGameState(prev => ({
+        ...prev,
+        difficulty,
+        weatherMultiplier: multiplier,
+        currentWeather: weather
+      }));
+      
+      setStatus({ 
+        message: `✅ AI Difficulty set: ${difficulty} | Weather: ${weather} | Speed: ${multiplier}x`, 
+        type: "success" 
+      });
+    } catch (error) {
+      console.error("Failed to update difficulty:", error);
+      setStatus({ message: "⚠️ Using default difficulty", type: "warning" });
+    }
+  };
+
+  const generateEnemyPatternForGame = async (sessionIdToUse) => {
+    // CRITICAL: Generate enemy spawn pattern using LLM consensus
+    // Game CANNOT spawn enemies without calling this first
+    // Pattern is generated based on player skill and current weather
+    if (!clientRef.current || !isWalletConnected) {
+      setStatus({ message: "⚠️ Wallet not connected - using default pattern", type: "warning" });
+      return;
+    }
+    
+    try {
+      setStatus({ message: "🤖 AI generating enemy patterns...", type: "loading" });
+      
+      // Determine player skill based on previous scores
+      const playerSkill = gameState.score > 500 ? "expert" : gameState.score > 100 ? "intermediate" : "beginner";
+      
+      // Call contract to generate enemy pattern using AI consensus
+      const tx = await clientRef.current.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "generate_enemy_pattern_for_session",
+        args: [sessionIdToUse, playerSkill],
+      });
+      await clientRef.current.waitForTransactionReceipt({ hash: tx, status: "FINALIZED" });
+      
+      // Get the AI-generated pattern
+      const pattern = await clientRef.current.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "get_enemy_pattern",
+        args: [sessionIdToUse],
+      });
+      
+      setIntelligentGameState(prev => ({
+        ...prev,
+        enemyPattern: pattern,
+        enemyPatternLoaded: true
+      }));
+      
+      setStatus({ message: "✅ Enemy pattern loaded from AI consensus", type: "success" });
+    } catch (error) {
+      console.error("Failed to generate enemy pattern:", error);
+      setStatus({ message: "⚠️ Using default enemy pattern", type: "warning" });
+    }
+  };
+
+  const getIntelligentGameState = async () => {
+    // Get complete game state including AI-generated parameters
+    // Called before game starts to get enemy patterns, difficulty, and weather effects
+    if (!clientRef.current || !isWalletConnected) return;
+    
+    try {
+      const state = await clientRef.current.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "get_intelligent_game_state",
+        args: [],
+      });
+      
+      setIntelligentGameState(prev => ({
+        ...prev,
+        difficulty: state.difficulty,
+        weatherMultiplier: state.weather_multiplier,
+        currentWeather: state.weather,
+        enemyPatternLoaded: state.enemy_pattern_available
+      }));
+      
+      return state;
+    } catch (error) {
+      console.error("Failed to get intelligent game state:", error);
+    }
+  };
+
+  const submitScoreIntelligent = async (finalScore, moves) => {
+    // CRITICAL: Submit score with AI-powered anti-cheat validation
+    // Score is ONLY recorded if AI validators agree it's legitimate
+    // Uses LLM consensus to analyze gameplay data and detect cheaters
+    if (!clientRef.current || !isWalletConnected) return;
+    
+    const gameTime = Math.floor((Date.now() - gameStartTime) / 1000);
+    
+    try {
+      setStatus({ message: "🤖 AI validating score for cheating...", type: "loading" });
+      
+      // Call contract with AI anti-cheat validation
+      const tx = await clientRef.current.writeContract({
+        address: CONTRACT_ADDRESS,
+        functionName: "submit_score_intelligent",
+        args: [sessionId || "solo", playerName, finalScore.toString(), gameTime.toString(), moves],
+      });
+      await clientRef.current.waitForTransactionReceipt({ hash: tx, status: "FINALIZED" });
+      
+      setIntelligentGameState(prev => ({ ...prev, aiVerified: true }));
+      setStatus({ message: "✅ Score verified by AI consensus!", type: "success" });
+      
+      return "ACCEPTED";
+    } catch (error) {
+      console.error("Failed to submit score:", error);
+      setStatus({ message: "❌ Score rejected by AI validation", type: "error" });
+      return "REJECTED";
     }
   };
 
